@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sharky Studio</title>
+    <style>
+      /* Kill all default margins — we want Blockly to fill the whole screen */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <!-- React will inject our entire app inside this div -->
+    <div id="root"></div>
+
+    <!-- This loads our JavaScript entry point -->
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

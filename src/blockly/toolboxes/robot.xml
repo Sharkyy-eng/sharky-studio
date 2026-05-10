@@ -1,0 +1,7 @@
+<xml id="toolbox" style="display: none">
+  <category name="Movement" colour="230">
+    <block type="move_forward"></block>
+    <block type="turn_left"></block>
+    <block type="turn_right"></block>
+  </category>
+</xml>

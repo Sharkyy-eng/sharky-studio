@@ -271,6 +271,27 @@ Blockly.common.defineBlocksWithJsonArray([
     previousStatement: null,   // no nextStatement
     colour: '#FFAB19',
   },
+  // Clones
+  {
+    type: 'sprite_when_i_start_as_clone',
+    message0: 'when I start as a clone',
+    nextStatement: null,
+    colour: '#FFAB19',
+  },
+  {
+    type: 'sprite_create_clone_of',
+    message0: 'create clone of %1',
+    args0: [{ type: 'field_dropdown', name: 'TARGET', options: [
+      ['myself', 'myself'],
+    ]}],
+    previousStatement: null, nextStatement: null, colour: '#FFAB19',
+  },
+  {
+    type: 'sprite_delete_clone',
+    message0: 'delete this clone',
+    previousStatement: null,   // no nextStatement
+    colour: '#FFAB19',
+  },
 
   // ── OPERATORS ────────────────────────────────────────────────────
   // Arithmetic (Number reporters)

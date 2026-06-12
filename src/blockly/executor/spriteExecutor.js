@@ -106,7 +106,8 @@ function isHatBlock(block) {
   return block.type === 'sprite_when_flag_clicked'
     || block.type === 'sprite_when_key_pressed'
     || block.type === 'sprite_when_clicked'
-    || block.type === 'sprite_when_i_receive';
+    || block.type === 'sprite_when_i_receive'
+    || block.type === 'sprite_when_i_start_as_clone';
 }
 
 function* walkBlocks(block, state, ctx) {
@@ -303,6 +304,7 @@ function* applyBlock(block, state, ctx) {
     case 'sprite_when_key_pressed':
     case 'sprite_when_clicked':
     case 'sprite_when_i_receive':
+    case 'sprite_when_i_start_as_clone':
       break;
     case 'sprite_broadcast': {
       const message = block.getFieldValue('MESSAGE') ?? '';
@@ -380,6 +382,22 @@ function* applyBlock(block, state, ctx) {
     case 'sprite_stop': {
       ctx.stop = true;
       yield { state: { ...state }, stop: true };
+      break;
+    }
+
+    // ── CLONES ───────────────────────────────────────────────
+    // The executor has no access to the sprite list — App.jsx creates the
+    // clone (and starts its "when I start as a clone" scripts) when it sees
+    // `createClone` on a yielded frame.
+    case 'sprite_create_clone_of': {
+      yield { state: { ...state }, createClone: true };
+      break;
+    }
+    // Likewise, App.jsx removes this sprite from the sprite list and stops
+    // all of its other running scripts when it sees `deleteClone`.
+    case 'sprite_delete_clone': {
+      ctx.stop = true;
+      yield { state: { ...state }, deleteClone: true, stop: true };
       break;
     }
   }

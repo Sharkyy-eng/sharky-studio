@@ -206,7 +206,7 @@ function Stage({ sprites, onCanvasClick, onSpriteDrag, onSelectSprite, onStageMo
     const hit = hitTestSprites(sprites, cx, cy);
     if (!hit) return;
 
-    onSelectSprite?.(hit.id);
+    if (!hit.isClone) onSelectSprite?.(hit.id);
     const s = hit.state;
     const scx = CANVAS_W / 2 + s.x;
     const scy = CANVAS_H / 2 - s.y;
@@ -469,6 +469,41 @@ function App() {
     return obj;
   }
 
+  // Clones share their scripts with the sprite that was cloned (Scratch's
+  // model — clones never have their own Blockly workspace). For an original
+  // sprite this is just its own id; for a clone (possibly of a clone) it's
+  // the id of the original sprite whose workspace defines its scripts.
+  function getScriptSourceId(sprite) {
+    return sprite.sourceSpriteId ?? sprite.id;
+  }
+
+  // Creates a clone of the sprite running thread `sourceThreadId`, copying
+  // `snapshotState` as its initial state, and immediately starts its
+  // "when I start as a clone" scripts (if any), each as its own thread.
+  function spawnClone(sourceThreadId, snapshotState) {
+    const runner = spritesRef.current.find(s => s.id === sourceThreadId);
+    const sourceId = runner ? getScriptSourceId(runner) : sourceThreadId;
+    const newClone = {
+      id: crypto.randomUUID(),
+      name: (runner?.name ?? 'Sprite') + ' clone',
+      state: { ...snapshotState },
+      isClone: true,
+      sourceSpriteId: sourceId,
+    };
+    setSprites(prev => [...prev, newClone]);
+    spritesRef.current = [...spritesRef.current, newClone];
+
+    const ws = spriteWorkspaces.current.get(sourceId);
+    if (!ws) return;
+    const scripts = getHatScripts(ws, 'sprite_when_i_start_as_clone', null, null);
+    if (scripts.length === 0) return;
+    const cloneState = getSpriteStateObj(newClone);
+    for (const script of scripts) {
+      const gen = runScript(script, cloneState, worldRef.current);
+      playFramesForSprite(newClone.id, gen);
+    }
+  }
+
   // Drives a script generator for a single sprite, independent of all others.
   // `gen` is the iterator returned by runScript — each `.next()` runs the
   // script until its next frame, so loops re-check live Sensing state
@@ -504,6 +539,25 @@ function App() {
       }
       if (result.done) { finish(); return; }
       const frame = result.value;
+
+      // "delete this clone" — remove this sprite entirely and stop all of
+      // its other running threads; nothing else to update for it.
+      if (frame.deleteClone) {
+        setSprites(prev => prev.filter(s => s.id !== id));
+        spritesRef.current = spritesRef.current.filter(s => s.id !== id);
+        const otherTimers = animTimersRef.current.get(id);
+        if (otherTimers) {
+          for (const t of otherTimers) clearTimeout(t);
+          animTimersRef.current.delete(id);
+        }
+        spriteStateRefs.current.delete(id);
+        setIsRunning(anyRunning());
+        onDone?.();
+        return;
+      }
+
+      if (frame.createClone) spawnClone(id, frame.state);
+
       setSprites(prev => prev.map(s => s.id === id ? { ...s, state: { ...frame.state } } : s));
       if (frame.broadcast) handleBroadcast(frame.broadcast);
       if (frame.stop) { finish(); return; }
@@ -519,7 +573,7 @@ function App() {
   // independent animation (Scratch's broadcast/receive messaging).
   function handleBroadcast(message) {
     for (const sprite of spritesRef.current) {
-      const ws = spriteWorkspaces.current.get(sprite.id);
+      const ws = spriteWorkspaces.current.get(getScriptSourceId(sprite));
       if (!ws) continue;
       const scripts = getHatScripts(ws, 'sprite_when_i_receive', 'MESSAGE', message);
       if (scripts.length === 0) continue;
@@ -567,9 +621,12 @@ function App() {
   // Inject / dispose a Blockly workspace per sprite, one per hidden <div>.
   // Each sprite keeps its own live workspace so scripts persist when
   // switching sprites and so Run can execute every sprite's scripts directly.
-  const spriteIdsKey = sprites.map(s => s.id).join(',');
+  // Clones never get their own workspace — they run their source sprite's
+  // scripts (see getScriptSourceId) and have no entry in the sprite strip.
+  const spriteIdsKey = sprites.filter(s => !s.isClone).map(s => s.id).join(',');
   useEffect(() => {
     for (const sprite of sprites) {
+      if (sprite.isClone) continue;
       if (spriteWorkspaces.current.has(sprite.id)) continue;
       const div = spriteWorkspaceDivs.current.get(sprite.id);
       if (!div) continue;
@@ -583,7 +640,7 @@ function App() {
       spriteWorkspaces.current.set(sprite.id, workspace);
     }
 
-    const currentIds = new Set(sprites.map(s => s.id));
+    const currentIds = new Set(sprites.filter(s => !s.isClone).map(s => s.id));
     for (const [id, workspace] of spriteWorkspaces.current) {
       if (!currentIds.has(id)) {
         workspace.dispose();
@@ -612,7 +669,18 @@ function App() {
 
   function handleRun() {
     if (isRunning) { stopAll(); return; }
-    for (const sprite of sprites) {
+
+    // Green flag deletes all clones from the previous run (Scratch behavior).
+    const originals = sprites.filter(s => !s.isClone);
+    if (originals.length !== sprites.length) {
+      for (const s of sprites) {
+        if (s.isClone) spriteStateRefs.current.delete(s.id);
+      }
+      setSprites(originals);
+      spritesRef.current = originals;
+    }
+
+    for (const sprite of originals) {
       const ws = spriteWorkspaces.current.get(sprite.id);
       if (!ws) continue;
       const scripts = getFlagScripts(ws);
@@ -635,7 +703,7 @@ function App() {
       // e.key for spacebar is ' '; the block field uses 'space'
       const key = e.key === ' ' ? 'space' : e.key;
       for (const sprite of spritesRef.current) {
-        const ws = spriteWorkspaces.current.get(sprite.id);
+        const ws = spriteWorkspaces.current.get(getScriptSourceId(sprite));
         if (!ws) continue;
         const scripts = getHatScripts(ws, 'sprite_when_key_pressed', 'KEY', key);
         if (scripts.length === 0) continue;
@@ -692,7 +760,7 @@ function App() {
       const cy = CANVAS_H / 2 - s.y;
       if (Math.abs(canvasX - cx) > sw / 2 || Math.abs(canvasY - cy) > sh / 2) continue;
 
-      const ws = spriteWorkspaces.current.get(sprite.id);
+      const ws = spriteWorkspaces.current.get(getScriptSourceId(sprite));
       if (!ws) return;
       const scripts = getHatScripts(ws, 'sprite_when_clicked', null, null);
       if (scripts.length > 0) {
@@ -742,16 +810,22 @@ function App() {
   }
 
   function handleDeleteSprite(id) {
-    if (sprites.length <= 1) return;
-    const next = sprites.filter(s => s.id !== id);
+    if (sprites.filter(s => !s.isClone).length <= 1) return;
+    // Deleting a sprite also deletes any clones made from it.
+    const removed = sprites.filter(s => s.id === id || s.sourceSpriteId === id);
+    const next = sprites.filter(s => s.id !== id && s.sourceSpriteId !== id);
     setSprites(next);
-    if (id === selectedSpriteId) setSelectedSpriteId(next[0].id);
-    const timers = animTimersRef.current.get(id);
-    if (timers) {
-      for (const t of timers) clearTimeout(t);
-      animTimersRef.current.delete(id);
+    if (id === selectedSpriteId) {
+      setSelectedSpriteId((next.find(s => !s.isClone) ?? next[0]).id);
     }
-    spriteStateRefs.current.delete(id);
+    for (const sprite of removed) {
+      const timers = animTimersRef.current.get(sprite.id);
+      if (timers) {
+        for (const t of timers) clearTimeout(t);
+        animTimersRef.current.delete(sprite.id);
+      }
+      spriteStateRefs.current.delete(sprite.id);
+    }
   }
 
   return (
@@ -879,7 +953,7 @@ function App() {
               textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 6,
             }}>Sprites</span>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {sprites.map(sprite => (
+              {sprites.filter(sprite => !sprite.isClone).map(sprite => (
                 <div key={sprite.id}
                   onClick={() => setSelectedSpriteId(sprite.id)}
                   style={{
@@ -889,7 +963,7 @@ function App() {
                     cursor: 'pointer', background: '#222', gap: 3,
                     position: 'relative',
                   }}>
-                  {sprites.length > 1 && (
+                  {sprites.filter(s => !s.isClone).length > 1 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDeleteSprite(sprite.id); }}
                       title="Delete sprite"
@@ -967,7 +1041,7 @@ function App() {
           </div>
 
           <div ref={robotDiv} style={{ flex: 1, display: workspaceMode === 'robot' ? 'block' : 'none' }} />
-          {sprites.map(sprite => (
+          {sprites.filter(sprite => !sprite.isClone).map(sprite => (
             <div key={sprite.id}
               ref={el => { if (el) spriteWorkspaceDivs.current.set(sprite.id, el); }}
               style={{

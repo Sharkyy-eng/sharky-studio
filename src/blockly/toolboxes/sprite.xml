@@ -85,6 +85,10 @@
     <block type="sprite_repeat_until"/>
     <sep gap="8"/>
     <block type="sprite_stop"/>
+    <sep gap="8"/>
+    <block type="sprite_when_i_start_as_clone"/>
+    <block type="sprite_create_clone_of"/>
+    <block type="sprite_delete_clone"/>
   </category>
 
   <category name="Sensing" colour="#5CB1D6">

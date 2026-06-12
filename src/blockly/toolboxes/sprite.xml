@@ -1,6 +1,6 @@
 <xml xmlns="https://developers.google.com/blockly/xml">
 
-  <category name="Motion" colour="#4C97FF">
+  <category name="Motion" colour="#1260A1">
     <block type="sprite_move_steps"><field name="STEPS">10</field></block>
     <block type="sprite_turn_right"><field name="DEGREES">15</field></block>
     <block type="sprite_turn_left"><field name="DEGREES">15</field></block>
@@ -27,7 +27,7 @@
     <block type="sprite_direction"/>
   </category>
 
-  <category name="Looks" colour="#9966FF">
+  <category name="Looks" colour="#4FA8D8">
     <block type="sprite_say_for_secs">
       <field name="TEXT">Hello!</field><field name="SECS">2</field>
     </block>
@@ -49,7 +49,7 @@
     <block type="sprite_size_reporter"/>
   </category>
 
-  <category name="Events" colour="#FFD500">
+  <category name="Events" colour="#F57E0F">
     <block type="sprite_when_flag_clicked"/>
     <block type="sprite_when_key_pressed"/>
     <block type="sprite_when_clicked"/>
@@ -59,7 +59,7 @@
     <block type="sprite_when_i_receive"/>
   </category>
 
-  <category name="Control" colour="#FFAB19">
+  <category name="Control" colour="#FBB454">
     <block type="sprite_wait"><field name="SECS">1</field></block>
     <block type="sprite_repeat"><field name="TIMES">10</field></block>
     <block type="sprite_forever"/>
@@ -91,7 +91,7 @@
     <block type="sprite_delete_clone"/>
   </category>
 
-  <category name="Sensing" colour="#5CB1D6">
+  <category name="Sensing" colour="#2EBF91">
     <block type="sprite_touching"><field name="TARGET">edge</field></block>
     <block type="sprite_distance_to"><field name="TARGET">mouse-pointer</field></block>
     <sep gap="8"/>
@@ -104,7 +104,7 @@
     <block type="sprite_reset_timer"/>
   </category>
 
-  <category name="Operators" colour="#59C059">
+  <category name="Operators" colour="#8B6FD1">
     <block type="sprite_add">
       <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
       <value name="B"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
@@ -167,6 +167,6 @@
     </block>
   </category>
 
-  <category name="Variables" custom="VARIABLE" colour="#FF6680"/>
+  <category name="Variables" custom="VARIABLE" colour="#E0574A"/>
 
 </xml>

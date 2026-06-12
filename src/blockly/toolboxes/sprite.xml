@@ -53,6 +53,10 @@
     <block type="sprite_when_flag_clicked"/>
     <block type="sprite_when_key_pressed"/>
     <block type="sprite_when_clicked"/>
+    <sep gap="8"/>
+    <block type="sprite_broadcast"/>
+    <block type="sprite_broadcast_and_wait"/>
+    <block type="sprite_when_i_receive"/>
   </category>
 
   <category name="Control" colour="#FFAB19">

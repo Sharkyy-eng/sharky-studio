@@ -407,6 +407,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(320);
 
   const selectedSprite = sprites.find(s => s.id === selectedSpriteId) ?? sprites[0];
 
@@ -449,12 +450,24 @@ function App() {
       if (index >= frames.length) { finish(); return; }
       const frame = frames[index];
       setSprites(prev => prev.map(s => s.id === id ? { ...s, state: { ...frame.state } } : s));
+      if (frame.broadcast) handleBroadcast(frame.broadcast);
       if (frame.stop) { finish(); return; }
       const delay = frame.delay !== undefined ? frame.delay : STEP_DELAY;
       animTimersRef.current.set(id, setTimeout(() => step(index + 1), delay));
       setIsRunning(true);
     }
     step(0);
+  }
+
+  // Runs every sprite's "when I receive [message]" scripts, each as its own
+  // independent animation (Scratch's broadcast/receive messaging).
+  function handleBroadcast(message) {
+    for (const sprite of spritesRef.current) {
+      const ws = spriteWorkspaces.current.get(sprite.id);
+      if (!ws) continue;
+      const frames = executeHatBlocks(ws, 'sprite_when_i_receive', 'MESSAGE', message, sprite.state);
+      if (frames.length > 0) playFramesForSprite(sprite.id, frames);
+    }
   }
 
   function stopAll() {
@@ -590,6 +603,28 @@ function App() {
     setShowLibrary(false);
   }
 
+  // Drag the divider to resize the left (stage) panel.
+  function handleResizeMouseDown(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = leftPanelWidth;
+    const activeWorkspace = workspaceMode === 'robot'
+      ? robotWorkspaceRef.current
+      : spriteWorkspaces.current.get(selectedSpriteId);
+
+    function onMove(ev) {
+      const width = Math.min(640, Math.max(240, startWidth + (ev.clientX - startX)));
+      setLeftPanelWidth(width);
+      if (activeWorkspace) Blockly.svgResize(activeWorkspace);
+    }
+    function onUp() {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   function handleDeleteSprite(id) {
     if (sprites.length <= 1) return;
     const next = sprites.filter(s => s.id !== id);
@@ -621,8 +656,8 @@ function App() {
 
         {/* ── Left panel ────────────────────────────────────── */}
         <div style={{
-          width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column',
-          background: '#1a1a1a', borderRight: '1px solid #2e2e2e', overflow: 'hidden',
+          width: leftPanelWidth, flexShrink: 0, display: 'flex', flexDirection: 'column',
+          background: '#1a1a1a', overflow: 'hidden',
         }}>
 
           {/* Fullscreen overlay */}
@@ -775,6 +810,12 @@ function App() {
             </div>
           </div>
         </div>
+
+        {/* ── Divider: drag to resize the stage panel ─────────── */}
+        <div
+          onMouseDown={handleResizeMouseDown}
+          style={{ width: 6, flexShrink: 0, cursor: 'col-resize', background: '#2e2e2e' }}
+        />
 
         {/* ── Right: mode toggle + workspaces ─────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

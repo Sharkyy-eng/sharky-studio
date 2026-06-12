@@ -28,6 +28,10 @@ export const DEFAULT_SPRITE_STATE = {
 // (from any sprite) keep producing a new extreme value.
 let layerCounter = 0;
 
+// Approximate pause for "broadcast and wait" — receivers run as separate
+// animations, so we can't truly block until they finish.
+const BROADCAST_WAIT_MS = 300;
+
 // Returns an array of frames: { state, delay? (ms), stop? (boolean) }
 // initialState defaults to DEFAULT_SPRITE_STATE, so position persists between runs.
 export function executeSprite(workspace, initialState = DEFAULT_SPRITE_STATE) {
@@ -69,7 +73,8 @@ export function executeHatBlocks(workspace, hatType, matchField, matchValue, ini
 function isHatBlock(block) {
   return block.type === 'sprite_when_flag_clicked'
     || block.type === 'sprite_when_key_pressed'
-    || block.type === 'sprite_when_clicked';
+    || block.type === 'sprite_when_clicked'
+    || block.type === 'sprite_when_i_receive';
 }
 
 function walkBlocks(block, state, frames) {
@@ -262,7 +267,18 @@ function applyBlock(block, state, frames) {
     case 'sprite_when_flag_clicked':
     case 'sprite_when_key_pressed':
     case 'sprite_when_clicked':
+    case 'sprite_when_i_receive':
       break;
+    case 'sprite_broadcast': {
+      const message = block.getFieldValue('MESSAGE') ?? '';
+      frames.push({ state: { ...s }, broadcast: message });
+      break;
+    }
+    case 'sprite_broadcast_and_wait': {
+      const message = block.getFieldValue('MESSAGE') ?? '';
+      frames.push({ state: { ...s }, broadcast: message, delay: BROADCAST_WAIT_MS });
+      break;
+    }
 
     // ── CONTROL ──────────────────────────────────────────────
     case 'sprite_wait': {

@@ -186,6 +186,25 @@ Blockly.common.defineBlocksWithJsonArray([
     nextStatement: null,
     colour: '#FFD500',
   },
+  {
+    type: 'sprite_broadcast',
+    message0: 'broadcast %1',
+    args0: [{ type: 'field_input', name: 'MESSAGE', text: 'message1' }],
+    previousStatement: null, nextStatement: null, colour: '#FFD500',
+  },
+  {
+    type: 'sprite_broadcast_and_wait',
+    message0: 'broadcast %1 and wait',
+    args0: [{ type: 'field_input', name: 'MESSAGE', text: 'message1' }],
+    previousStatement: null, nextStatement: null, colour: '#FFD500',
+  },
+  {
+    type: 'sprite_when_i_receive',
+    message0: 'when I receive %1',
+    args0: [{ type: 'field_input', name: 'MESSAGE', text: 'message1' }],
+    nextStatement: null,
+    colour: '#FFD500',
+  },
 
   // ── CONTROL ──────────────────────────────────────────────────────
   {

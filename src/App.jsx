@@ -136,9 +136,31 @@ function Stage({ sprites, onCanvasClick, onSpriteDrag, onSelectSprite }) {
   const imageCacheRef = useRef(new Map());
   const [redrawTick, forceRedraw] = useState(0);
 
+  // Keep the canvas's backing-store resolution matched to its displayed size
+  // (x devicePixelRatio) so costumes stay sharp at any zoom level, e.g. fullscreen.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const observer = new ResizeObserver(() => forceRedraw(t => t + 1));
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
+
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const pixelW = Math.max(1, Math.round(rect.width * dpr));
+    const pixelH = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== pixelW || canvas.height !== pixelH) {
+      canvas.width = pixelW;
+      canvas.height = pixelH;
+    }
+    ctx.setTransform(pixelW / CANVAS_W, 0, 0, pixelH / CANVAS_H, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
     ctx.fillStyle = '#f8f8f8';

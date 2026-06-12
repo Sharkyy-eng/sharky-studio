@@ -20,6 +20,10 @@ const STEP_DELAY = 300;
 const CANVAS_W = 480;
 const CANVAS_H = 300;
 
+// Roundy's walk costumes, used by the "Saved!" popup's walking animation.
+const ROUNDY_WALK1 = SPRITE_LIBRARY[0].costumes.find(c => c.name === 'walk1').url;
+const ROUNDY_WALK2 = SPRITE_LIBRARY[0].costumes.find(c => c.name === 'walk2').url;
+
 // `libraryName` records which SPRITE_LIBRARY entry this sprite's costumes
 // came from (default 'Roundy', matching DEFAULT_SPRITE_STATE) — saved projects
 // store this instead of raw costume URLs, which are re-resolved from
@@ -405,6 +409,48 @@ function SpriteLibraryModal({ onChoose, onClose }) {
   );
 }
 
+// ─── "Saved!" popup ──────────────────────────────────────────
+// Roundy walks (alternating walk1/walk2 costumes) for 2 seconds while the
+// popup is shown, then it auto-dismisses (see the showSavedPopup effect).
+function SavedPopup({ frame }) {
+  const F = 'system-ui, sans-serif';
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 3000, display: 'flex',
+      alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+    }}>
+      <div style={{
+        background: '#1a1a1a', border: '1px solid #333', borderRadius: 12,
+        padding: '20px 32px', display: 'flex', alignItems: 'center', gap: 14,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+      }}>
+        <img src={frame === 0 ? ROUNDY_WALK1 : ROUNDY_WALK2} alt="Roundy"
+          style={{ width: 56, height: 56, objectFit: 'contain' }} />
+        <span style={{ color: '#fff', fontWeight: 700, fontSize: 18, fontFamily: F }}>Saved!</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── File menu dropdown item ──────────────────────────────────
+function FileMenuItem({ label, onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        padding: '6px 10px', borderRadius: 4, cursor: 'pointer',
+        color: '#ccc', fontSize: 13, fontFamily: 'system-ui, sans-serif',
+        background: hover ? '#333' : 'transparent', whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────
 function App() {
   const robotDiv = useRef(null);
@@ -437,6 +483,10 @@ function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(320);
+  const [projectName, setProjectName] = useState('Untitled');
+  const [showFileMenu, setShowFileMenu] = useState(false);
+  const [showSavedPopup, setShowSavedPopup] = useState(false);
+  const [savedPopupFrame, setSavedPopupFrame] = useState(0);
 
   const selectedSprite = sprites.find(s => s.id === selectedSpriteId) ?? sprites[0];
 
@@ -681,6 +731,16 @@ function App() {
     }
   }, [workspaceMode, selectedSpriteId]);
 
+  // "Saved" popup: Roundy walks (alternating walk1/walk2 costumes every
+  // 300ms) for 2 seconds, then the popup auto-dismisses.
+  useEffect(() => {
+    if (!showSavedPopup) return;
+    setSavedPopupFrame(0);
+    const frameTimer = setInterval(() => setSavedPopupFrame(f => 1 - f), 300);
+    const hideTimer = setTimeout(() => setShowSavedPopup(false), 2000);
+    return () => { clearInterval(frameTimer); clearTimeout(hideTimer); };
+  }, [showSavedPopup]);
+
   function handleRun() {
     if (isRunning) { stopAll(); return; }
 
@@ -847,7 +907,7 @@ function App() {
   // Costumes aren't stored directly — Vite asset URLs are hashed per build,
   // so each sprite's `libraryName` is saved instead and costumes are
   // re-resolved from SPRITE_LIBRARY on load.
-  function handleSaveProject() {
+  function handleSaveProject(name = projectName) {
     const originals = sprites.filter(s => !s.isClone);
     const spriteData = originals.map(sprite => {
       const ws = spriteWorkspaces.current.get(sprite.id);
@@ -871,16 +931,42 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'project.mebot';
+    a.download = `${name || 'Untitled'}.mebot`;
     a.click();
     URL.revokeObjectURL(url);
+
+    setShowSavedPopup(true);
   }
 
   // Loads a .mebot project file: rebuilds sprites with fresh ids (so the
   // workspace-injection effect always treats them as new), stashes each
   // sprite's saved Blockly XML in pendingWorkspaceXmlRef to be applied once
   // its workspace is injected, and restores the robot workspace directly.
+  // Resets to a single fresh "Roundy" sprite and an empty robot workspace —
+  // mirrors the app's initial state.
+  function handleNewProject() {
+    stopAll();
+    pendingWorkspaceXmlRef.current.clear();
+    const fresh = createSprite('Roundy');
+    setSprites([fresh]);
+    spritesRef.current = [fresh];
+    setSelectedSpriteId(fresh.id);
+    setProjectName('Untitled');
+    if (robotWorkspaceRef.current) robotWorkspaceRef.current.clear();
+    setShowFileMenu(false);
+  }
+
+  // Prompts for a new file name, then saves under that name.
+  function handleSaveAs() {
+    const name = window.prompt('Save project as:', projectName);
+    if (!name) return;
+    setProjectName(name);
+    handleSaveProject(name);
+    setShowFileMenu(false);
+  }
+
   function handleLoadProject(file) {
+    const loadedName = file.name.replace(/\.mebot$/i, '');
     const reader = new FileReader();
     reader.onload = () => {
       let project;
@@ -917,6 +1003,7 @@ function App() {
       spritesRef.current = newSprites;
       const idx = Math.min(Math.max(0, project.selectedIndex ?? 0), newSprites.length - 1);
       setSelectedSpriteId(newSprites[idx].id);
+      setProjectName(loadedName);
 
       if (robotWorkspaceRef.current) {
         robotWorkspaceRef.current.clear();
@@ -937,37 +1024,84 @@ function App() {
       )}
 
       {/* ── Top bar ─────────────────────────────────────────── */}
+      {showSavedPopup && <SavedPopup frame={savedPopupFrame} />}
       <div style={{
         height: 48, background: '#111', display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', padding: '0 16px',
+        gap: 16, padding: '0 16px',
         borderBottom: '1px solid #2e2e2e', flexShrink: 0,
       }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, fontFamily: 'system-ui, sans-serif' }}>
-          Sharky Studio
+        {/* Branding */}
+        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span style={{
+            color: '#ff8c00', fontWeight: 800, fontSize: 16,
+            letterSpacing: '0.04em', fontFamily: 'system-ui, sans-serif',
+          }}>MEBOT</span>
+          <span style={{ color: '#444', fontSize: 14 }}>|</span>
+          <span style={{ color: '#999', fontWeight: 500, fontSize: 14, fontFamily: 'system-ui, sans-serif' }}>
+            mebotStudio
+          </span>
         </span>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".mebot"
-            style={{ display: 'none' }}
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) handleLoadProject(file);
-              e.target.value = '';
-            }}
-          />
-          <button onClick={() => fileInputRef.current?.click()} style={{
-            background: '#2a2a2a', color: '#ccc', border: '1px solid #444',
+
+        {/* File menu */}
+        <div style={{ position: 'relative' }}>
+          <button onClick={() => setShowFileMenu(v => !v)} style={{
+            background: showFileMenu ? '#2a2a2a' : 'transparent',
+            color: '#ccc', border: '1px solid transparent',
             borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
-            fontSize: 12, fontFamily: 'system-ui, sans-serif',
-          }}>Load Project</button>
-          <button onClick={handleSaveProject} style={{
-            background: '#2a2a2a', color: '#ccc', border: '1px solid #444',
-            borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
-            fontSize: 12, fontFamily: 'system-ui, sans-serif',
-          }}>Save Project</button>
+            fontSize: 13, fontFamily: 'system-ui, sans-serif',
+          }}>
+            File
+          </button>
+          {showFileMenu && (
+            <>
+              <div onClick={() => setShowFileMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 1999 }} />
+              <div style={{
+                position: 'absolute', top: '110%', left: 0, zIndex: 2000,
+                background: '#222', border: '1px solid #3a3a3a', borderRadius: 6,
+                minWidth: 160, padding: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              }}>
+                <FileMenuItem label="New Project" onClick={handleNewProject} />
+                <FileMenuItem label="Open Project..." onClick={() => { fileInputRef.current?.click(); setShowFileMenu(false); }} />
+                <div style={{ height: 1, background: '#3a3a3a', margin: '4px 0' }} />
+                <FileMenuItem label="Save" onClick={() => { handleSaveProject(); setShowFileMenu(false); }} />
+                <FileMenuItem label="Save As..." onClick={handleSaveAs} />
+              </div>
+            </>
+          )}
         </div>
+
+        {/* Project name */}
+        <input
+          value={projectName}
+          onChange={e => setProjectName(e.target.value)}
+          style={{
+            background: 'transparent', border: '1px solid #333', borderRadius: 14,
+            color: '#ddd', fontSize: 13, fontFamily: 'system-ui, sans-serif',
+            padding: '5px 14px', outline: 'none', width: 160, textAlign: 'center',
+          }}
+        />
+
+        <div style={{ flex: 1 }} />
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".mebot"
+          style={{ display: 'none' }}
+          onChange={e => {
+            const file = e.target.files?.[0];
+            if (file) handleLoadProject(file);
+            e.target.value = '';
+          }}
+        />
+        <button onClick={() => handleSaveProject()} style={{
+          background: '#2a2a2a', color: '#fff', border: '1px solid #444',
+          borderRadius: 6, padding: '5px 14px', cursor: 'pointer',
+          fontSize: 13, fontFamily: 'system-ui, sans-serif',
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <span style={{ fontSize: 14 }}>💾</span> Save
+        </button>
       </div>
 
       {/* ── Content ─────────────────────────────────────────── */}

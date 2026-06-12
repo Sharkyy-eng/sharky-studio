@@ -87,6 +87,19 @@
     <block type="sprite_stop"/>
   </category>
 
+  <category name="Sensing" colour="#5CB1D6">
+    <block type="sprite_touching"><field name="TARGET">edge</field></block>
+    <block type="sprite_distance_to"><field name="TARGET">mouse-pointer</field></block>
+    <sep gap="8"/>
+    <block type="sprite_key_pressed"/>
+    <block type="sprite_mouse_x"/>
+    <block type="sprite_mouse_y"/>
+    <block type="sprite_mouse_down"/>
+    <sep gap="8"/>
+    <block type="sprite_timer"/>
+    <block type="sprite_reset_timer"/>
+  </category>
+
   <category name="Operators" colour="#59C059">
     <block type="sprite_add">
       <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>

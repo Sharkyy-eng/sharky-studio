@@ -448,4 +448,43 @@ Blockly.common.defineBlocksWithJsonArray([
     args0: [{ type: 'field_input', name: 'TEXT', text: '' }],
     output: 'String', colour: '#59C059',
   },
+
+  // ── SENSING ──────────────────────────────────────────────────────
+  {
+    type: 'sprite_touching',
+    message0: 'touching %1 ?',
+    args0: [{ type: 'field_input', name: 'TARGET', text: 'edge' }],
+    output: 'Boolean', colour: '#5CB1D6',
+  },
+  {
+    type: 'sprite_distance_to',
+    message0: 'distance to %1',
+    args0: [{ type: 'field_input', name: 'TARGET', text: 'mouse-pointer' }],
+    output: 'Number', colour: '#5CB1D6',
+  },
+  {
+    type: 'sprite_key_pressed',
+    message0: 'key %1 pressed?',
+    args0: [{ type: 'field_dropdown', name: 'KEY', options: [
+      ['space', 'space'],
+      ['up arrow', 'ArrowUp'], ['down arrow', 'ArrowDown'],
+      ['left arrow', 'ArrowLeft'], ['right arrow', 'ArrowRight'],
+      ['any', 'any'],
+      ['a','a'],['b','b'],['c','c'],['d','d'],['e','e'],['f','f'],
+      ['g','g'],['h','h'],['i','i'],['j','j'],['k','k'],['l','l'],
+      ['m','m'],['n','n'],['o','o'],['p','p'],['q','q'],['r','r'],
+      ['s','s'],['t','t'],['u','u'],['v','v'],['w','w'],['x','x'],
+      ['y','y'],['z','z'],
+    ]}],
+    output: 'Boolean', colour: '#5CB1D6',
+  },
+  { type: 'sprite_mouse_x', message0: 'mouse x', output: 'Number', colour: '#5CB1D6' },
+  { type: 'sprite_mouse_y', message0: 'mouse y', output: 'Number', colour: '#5CB1D6' },
+  { type: 'sprite_mouse_down', message0: 'mouse down?', output: 'Boolean', colour: '#5CB1D6' },
+  { type: 'sprite_timer', message0: 'timer', output: 'Number', colour: '#5CB1D6' },
+  {
+    type: 'sprite_reset_timer',
+    message0: 'reset timer',
+    previousStatement: null, nextStatement: null, colour: '#5CB1D6',
+  },
 ]);

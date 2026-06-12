@@ -9,7 +9,7 @@ import './blockly/blocks/spriteBlocks.js';
 
 import { workspaceToArduino } from './blockly/generators/arduino.js';
 import { workspaceToPython }  from './blockly/generators/python.js';
-import { executeSprite, executeHatBlocks, DEFAULT_SPRITE_STATE } from './blockly/executor/spriteExecutor.js';
+import { executeSprite, executeHatBlocks, hasMatchingHat, DEFAULT_SPRITE_STATE } from './blockly/executor/spriteExecutor.js';
 
 import robotToolboxXml  from './blockly/toolboxes/robot.xml?raw';
 import spriteToolboxXml from './blockly/toolboxes/sprite.xml?raw';
@@ -130,7 +130,7 @@ function hitTestSprites(sprites, cx, cy) {
   return null;
 }
 
-function Stage({ sprites, onCanvasClick, onSpriteDrag, onSelectSprite }) {
+function Stage({ sprites, onCanvasClick, onSpriteDrag, onSelectSprite, onStageMouseMove }) {
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
   const imageCacheRef = useRef(new Map());
@@ -247,9 +247,19 @@ function Stage({ sprites, onCanvasClick, onSpriteDrag, onSelectSprite }) {
     window.addEventListener('mouseup', drag.onUp);
   }
 
+  // Tracks the stage-coordinate mouse position live for Sensing blocks
+  // ("mouse x", "mouse y", "touching mouse-pointer?"), independent of dragging.
+  function handleMouseMove(e) {
+    if (!onStageMouseMove) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const [cx, cy] = canvasCoords(e, rect);
+    onStageMouseMove(cx - CANVAS_W / 2, CANVAS_H / 2 - cy);
+  }
+
   return (
     <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
       onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
       style={{ display: 'block', width: '100%', height: 'auto', cursor: onCanvasClick ? 'pointer' : 'default' }} />
   );
 }
@@ -396,8 +406,19 @@ function App() {
   const robotWorkspaceRef = useRef(null);
   const spriteWorkspaces     = useRef(new Map()); // spriteId -> WorkspaceSvg
   const spriteWorkspaceDivs  = useRef(new Map()); // spriteId -> HTMLDivElement
-  const animTimersRef = useRef(new Map());        // spriteId -> timeoutId
+  const animTimersRef = useRef(new Map());        // spriteId -> Set<timeoutId> (one entry per running script "thread")
   const spritesRef = useRef([]);                  // always holds latest sprites without closure issues
+
+  // Live external state for Sensing blocks — mutated in place by input
+  // listeners below, and read lazily during script execution so "forever"
+  // loops see up-to-date keyboard/mouse/timer/other-sprite state each tick.
+  const inputStateRef = useRef({ mouseX: 0, mouseY: 0, mouseDown: false, keysDown: new Set() });
+  const timerStateRef = useRef({ start: Date.now() });
+  const worldRef = useRef({
+    getSprites: () => spritesRef.current,
+    input: inputStateRef.current,
+    timer: timerStateRef.current,
+  });
 
   const [workspaceMode, setWorkspaceMode] = useState('robot');
   const [arduinoCode, setArduinoCode] = useState('// Drag some blocks to generate code!');
@@ -433,30 +454,47 @@ function App() {
     ));
   }
 
-  // Plays a frame sequence for a single sprite, independent of all others.
-  function playFramesForSprite(id, frames, onDone) {
-    const existing = animTimersRef.current.get(id);
-    if (existing) clearTimeout(existing);
+  // Drives a script generator for a single sprite, independent of all others.
+  // `gen` is the iterator returned by executeSprite/executeHatBlocks — each
+  // `.next()` runs the script until its next frame, so loops re-check live
+  // Sensing state (keyboard/mouse/other sprites) every iteration.
+  function playFramesForSprite(id, gen, onDone) {
+    let timers = animTimersRef.current.get(id);
+    if (!timers) { timers = new Set(); animTimersRef.current.set(id, timers); }
 
-    function finish() {
-      animTimersRef.current.delete(id);
-      setIsRunning(animTimersRef.current.size > 0);
+    function anyRunning() {
+      for (const t of animTimersRef.current.values()) if (t.size > 0) return true;
+      return false;
+    }
+
+    function finish(prevTimeoutId) {
+      if (prevTimeoutId !== undefined) timers.delete(prevTimeoutId);
+      if (timers.size === 0) animTimersRef.current.delete(id);
+      setIsRunning(anyRunning());
       onDone?.();
     }
 
-    if (!frames || frames.length === 0) { finish(); return; }
-
-    function step(index) {
-      if (index >= frames.length) { finish(); return; }
-      const frame = frames[index];
+    function step(prevTimeoutId) {
+      if (prevTimeoutId !== undefined) timers.delete(prevTimeoutId);
+      let result;
+      try {
+        result = gen.next();
+      } catch (err) {
+        console.error('[Sharky] executor error:', err);
+        finish();
+        return;
+      }
+      if (result.done) { finish(); return; }
+      const frame = result.value;
       setSprites(prev => prev.map(s => s.id === id ? { ...s, state: { ...frame.state } } : s));
       if (frame.broadcast) handleBroadcast(frame.broadcast);
       if (frame.stop) { finish(); return; }
       const delay = frame.delay !== undefined ? frame.delay : STEP_DELAY;
-      animTimersRef.current.set(id, setTimeout(() => step(index + 1), delay));
+      const timeoutId = setTimeout(() => step(timeoutId), delay);
+      timers.add(timeoutId);
       setIsRunning(true);
     }
-    step(0);
+    step();
   }
 
   // Runs every sprite's "when I receive [message]" scripts, each as its own
@@ -465,13 +503,22 @@ function App() {
     for (const sprite of spritesRef.current) {
       const ws = spriteWorkspaces.current.get(sprite.id);
       if (!ws) continue;
-      const frames = executeHatBlocks(ws, 'sprite_when_i_receive', 'MESSAGE', message, sprite.state);
-      if (frames.length > 0) playFramesForSprite(sprite.id, frames);
+      if (!hasMatchingHat(ws, 'sprite_when_i_receive', 'MESSAGE', message)) continue;
+      const gen = executeHatBlocks(ws, 'sprite_when_i_receive', 'MESSAGE', message, sprite.state, worldRef.current);
+      playFramesForSprite(sprite.id, gen);
     }
   }
 
+  // Tracks the live stage-coordinate mouse position for Sensing blocks.
+  function handleStageMouseMove(x, y) {
+    inputStateRef.current.mouseX = x;
+    inputStateRef.current.mouseY = y;
+  }
+
   function stopAll() {
-    for (const t of animTimersRef.current.values()) clearTimeout(t);
+    for (const timers of animTimersRef.current.values()) {
+      for (const t of timers) clearTimeout(t);
+    }
     animTimersRef.current.clear();
     setIsRunning(false);
   }
@@ -525,7 +572,9 @@ function App() {
 
   // Stop all running animations on unmount
   useEffect(() => () => {
-    for (const t of animTimersRef.current.values()) clearTimeout(t);
+    for (const timers of animTimersRef.current.values()) {
+      for (const t of timers) clearTimeout(t);
+    }
   }, []);
 
   // Resize the visible workspace when switching mode or selected sprite
@@ -543,10 +592,8 @@ function App() {
     for (const sprite of sprites) {
       const ws = spriteWorkspaces.current.get(sprite.id);
       if (!ws) continue;
-      let frames;
-      try { frames = executeSprite(ws, sprite.state); }
-      catch (err) { console.error('[Sharky] executor error:', err); continue; }
-      if (frames.length > 0) playFramesForSprite(sprite.id, frames);
+      const gen = executeSprite(ws, sprite.state, worldRef.current);
+      playFramesForSprite(sprite.id, gen);
     }
   }
 
@@ -562,13 +609,44 @@ function App() {
       for (const sprite of spritesRef.current) {
         const ws = spriteWorkspaces.current.get(sprite.id);
         if (!ws) continue;
-        const frames = executeHatBlocks(ws, 'sprite_when_key_pressed', 'KEY', key, sprite.state);
-        if (frames.length > 0) playFramesForSprite(sprite.id, frames);
+        if (!hasMatchingHat(ws, 'sprite_when_key_pressed', 'KEY', key)) continue;
+        const gen = executeHatBlocks(ws, 'sprite_when_key_pressed', 'KEY', key, sprite.state, worldRef.current);
+        playFramesForSprite(sprite.id, gen);
       }
     }
     window.addEventListener('keydown', onKeyDown, true); // capture phase
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [workspaceMode]); // playFramesForSprite / spritesRef are stable refs, no need to list them
+
+  // Tracks live key-down state for the "key [x] pressed?" Sensing reporter.
+  // Separate from the capture-phase handler above (which fires hat-block
+  // scripts on each keydown) — this just maintains a held-keys set.
+  useEffect(() => {
+    function onKeyDown(e) {
+      inputStateRef.current.keysDown.add(e.key === ' ' ? 'space' : e.key);
+    }
+    function onKeyUp(e) {
+      inputStateRef.current.keysDown.delete(e.key === ' ' ? 'space' : e.key);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  // Tracks live mouse-button state for the "mouse down?" Sensing reporter.
+  useEffect(() => {
+    function onMouseDown() { inputStateRef.current.mouseDown = true; }
+    function onMouseUp() { inputStateRef.current.mouseDown = false; }
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
 
   // when sprite clicked — canvas click that lands inside a sprite's bounding box.
   // Hit-test front-to-back so the topmost sprite under the click wins.
@@ -584,8 +662,10 @@ function App() {
 
       const ws = spriteWorkspaces.current.get(sprite.id);
       if (!ws) return;
-      const frames = executeHatBlocks(ws, 'sprite_when_clicked', null, null, s);
-      playFramesForSprite(sprite.id, frames);
+      if (hasMatchingHat(ws, 'sprite_when_clicked', null, null)) {
+        const gen = executeHatBlocks(ws, 'sprite_when_clicked', null, null, s, worldRef.current);
+        playFramesForSprite(sprite.id, gen);
+      }
       return;
     }
   }
@@ -630,8 +710,11 @@ function App() {
     const next = sprites.filter(s => s.id !== id);
     setSprites(next);
     if (id === selectedSpriteId) setSelectedSpriteId(next[0].id);
-    const t = animTimersRef.current.get(id);
-    if (t) { clearTimeout(t); animTimersRef.current.delete(id); }
+    const timers = animTimersRef.current.get(id);
+    if (timers) {
+      for (const t of timers) clearTimeout(t);
+      animTimersRef.current.delete(id);
+    }
   }
 
   return (
@@ -701,7 +784,8 @@ function App() {
                   border: '1px solid #2e2e2e', borderRadius: 4, overflow: 'hidden',
                 }}>
                   <Stage sprites={sprites} onCanvasClick={handleCanvasClick}
-                    onSpriteDrag={handleSpriteDrag} onSelectSprite={setSelectedSpriteId} />
+                    onSpriteDrag={handleSpriteDrag} onSelectSprite={setSelectedSpriteId}
+                    onStageMouseMove={handleStageMouseMove} />
                 </div>
               </div>
             </div>
@@ -735,7 +819,8 @@ function App() {
             </div>
             <div style={{ border: '1px solid #2e2e2e', borderRadius: 4, overflow: 'hidden' }}>
               <Stage sprites={sprites} onCanvasClick={handleCanvasClick}
-                onSpriteDrag={handleSpriteDrag} onSelectSprite={setSelectedSpriteId} />
+                onSpriteDrag={handleSpriteDrag} onSelectSprite={setSelectedSpriteId}
+                onStageMouseMove={handleStageMouseMove} />
             </div>
           </div>
 

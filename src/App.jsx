@@ -9,7 +9,7 @@ import './blockly/blocks/spriteBlocks.js';
 
 import { workspaceToArduino } from './blockly/generators/arduino.js';
 import { workspaceToPython }  from './blockly/generators/python.js';
-import { executeSprite, executeHatBlocks, hasMatchingHat, DEFAULT_SPRITE_STATE } from './blockly/executor/spriteExecutor.js';
+import { runScript, getFlagScripts, getHatScripts, DEFAULT_SPRITE_STATE } from './blockly/executor/spriteExecutor.js';
 
 import robotToolboxXml  from './blockly/toolboxes/robot.xml?raw';
 import spriteToolboxXml from './blockly/toolboxes/sprite.xml?raw';
@@ -407,6 +407,7 @@ function App() {
   const spriteWorkspaces     = useRef(new Map()); // spriteId -> WorkspaceSvg
   const spriteWorkspaceDivs  = useRef(new Map()); // spriteId -> HTMLDivElement
   const animTimersRef = useRef(new Map());        // spriteId -> Set<timeoutId> (one entry per running script "thread")
+  const spriteStateRefs = useRef(new Map());      // spriteId -> shared mutable state object for the current run session
   const spritesRef = useRef([]);                  // always holds latest sprites without closure issues
 
   // Live external state for Sensing blocks — mutated in place by input
@@ -454,10 +455,24 @@ function App() {
     ));
   }
 
+  // Returns the shared mutable state object for a sprite's current run session,
+  // creating it from the sprite's latest React state on first use. All scripts
+  // started for this sprite during the same run share this single object, so
+  // concurrent threads (e.g. a broadcaster and its own receiver) mutate the
+  // same state rather than diverging copies.
+  function getSpriteStateObj(sprite) {
+    let obj = spriteStateRefs.current.get(sprite.id);
+    if (!obj) {
+      obj = { ...DEFAULT_SPRITE_STATE, ...sprite.state };
+      spriteStateRefs.current.set(sprite.id, obj);
+    }
+    return obj;
+  }
+
   // Drives a script generator for a single sprite, independent of all others.
-  // `gen` is the iterator returned by executeSprite/executeHatBlocks — each
-  // `.next()` runs the script until its next frame, so loops re-check live
-  // Sensing state (keyboard/mouse/other sprites) every iteration.
+  // `gen` is the iterator returned by runScript — each `.next()` runs the
+  // script until its next frame, so loops re-check live Sensing state
+  // (keyboard/mouse/other sprites) every iteration.
   function playFramesForSprite(id, gen, onDone) {
     let timers = animTimersRef.current.get(id);
     if (!timers) { timers = new Set(); animTimersRef.current.set(id, timers); }
@@ -469,7 +484,10 @@ function App() {
 
     function finish(prevTimeoutId) {
       if (prevTimeoutId !== undefined) timers.delete(prevTimeoutId);
-      if (timers.size === 0) animTimersRef.current.delete(id);
+      if (timers.size === 0) {
+        animTimersRef.current.delete(id);
+        spriteStateRefs.current.delete(id);
+      }
       setIsRunning(anyRunning());
       onDone?.();
     }
@@ -503,9 +521,13 @@ function App() {
     for (const sprite of spritesRef.current) {
       const ws = spriteWorkspaces.current.get(sprite.id);
       if (!ws) continue;
-      if (!hasMatchingHat(ws, 'sprite_when_i_receive', 'MESSAGE', message)) continue;
-      const gen = executeHatBlocks(ws, 'sprite_when_i_receive', 'MESSAGE', message, sprite.state, worldRef.current);
-      playFramesForSprite(sprite.id, gen);
+      const scripts = getHatScripts(ws, 'sprite_when_i_receive', 'MESSAGE', message);
+      if (scripts.length === 0) continue;
+      const state = getSpriteStateObj(sprite);
+      for (const script of scripts) {
+        const gen = runScript(script, state, worldRef.current);
+        playFramesForSprite(sprite.id, gen);
+      }
     }
   }
 
@@ -520,6 +542,7 @@ function App() {
       for (const t of timers) clearTimeout(t);
     }
     animTimersRef.current.clear();
+    spriteStateRefs.current.clear();
     setIsRunning(false);
   }
 
@@ -592,8 +615,13 @@ function App() {
     for (const sprite of sprites) {
       const ws = spriteWorkspaces.current.get(sprite.id);
       if (!ws) continue;
-      const gen = executeSprite(ws, sprite.state, worldRef.current);
-      playFramesForSprite(sprite.id, gen);
+      const scripts = getFlagScripts(ws);
+      if (scripts.length === 0) continue;
+      const state = getSpriteStateObj(sprite);
+      for (const script of scripts) {
+        const gen = runScript(script, state, worldRef.current);
+        playFramesForSprite(sprite.id, gen);
+      }
     }
   }
 
@@ -609,9 +637,13 @@ function App() {
       for (const sprite of spritesRef.current) {
         const ws = spriteWorkspaces.current.get(sprite.id);
         if (!ws) continue;
-        if (!hasMatchingHat(ws, 'sprite_when_key_pressed', 'KEY', key)) continue;
-        const gen = executeHatBlocks(ws, 'sprite_when_key_pressed', 'KEY', key, sprite.state, worldRef.current);
-        playFramesForSprite(sprite.id, gen);
+        const scripts = getHatScripts(ws, 'sprite_when_key_pressed', 'KEY', key);
+        if (scripts.length === 0) continue;
+        const state = getSpriteStateObj(sprite);
+        for (const script of scripts) {
+          const gen = runScript(script, state, worldRef.current);
+          playFramesForSprite(sprite.id, gen);
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown, true); // capture phase
@@ -662,9 +694,13 @@ function App() {
 
       const ws = spriteWorkspaces.current.get(sprite.id);
       if (!ws) return;
-      if (hasMatchingHat(ws, 'sprite_when_clicked', null, null)) {
-        const gen = executeHatBlocks(ws, 'sprite_when_clicked', null, null, s, worldRef.current);
-        playFramesForSprite(sprite.id, gen);
+      const scripts = getHatScripts(ws, 'sprite_when_clicked', null, null);
+      if (scripts.length > 0) {
+        const state = getSpriteStateObj(sprite);
+        for (const script of scripts) {
+          const gen = runScript(script, state, worldRef.current);
+          playFramesForSprite(sprite.id, gen);
+        }
       }
       return;
     }
@@ -715,6 +751,7 @@ function App() {
       for (const t of timers) clearTimeout(t);
       animTimersRef.current.delete(id);
     }
+    spriteStateRefs.current.delete(id);
   }
 
   return (

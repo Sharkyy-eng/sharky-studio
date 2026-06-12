@@ -45,38 +45,44 @@ const STAGE_HALF_H = 150;
 //
 // A frame is: { state, delay? (ms), stop? (boolean), broadcast? (string) }
 //
+// `state` is a single mutable object SHARED by every script/thread running
+// on a sprite (the caller creates one per sprite and passes it to every
+// `runScript` call for that sprite). Blocks mutate it in place, so changes
+// made by one concurrently-running script (e.g. a forever loop) are
+// immediately visible to another (e.g. a broadcast receiver) — matching
+// Scratch's model where every script on a sprite shares one set of fields.
+//
 // `world`, if provided, gives reporters access to live external state:
 //   world.getSprites() -> [{ id, name, state }, ...] (all sprites, live)
 //   world.input -> { mouseX, mouseY, mouseDown, keysDown: Set }
 //   world.timer -> { start: <ms timestamp> }
 
-// Runs the "when flag clicked" stacks (or, if none exist, every top-level
-// stack that isn't under a hat block).
-export function* executeSprite(workspace, initialState = DEFAULT_SPRITE_STATE, world = null) {
+// Runs a single script (the block chain starting at `startBlock`) to completion,
+// yielding a frame after every step. One generator = one concurrent "thread".
+export function* runScript(startBlock, state, world = null) {
   const ctx = { world, stop: false };
-  let state = { ...DEFAULT_SPRITE_STATE, ...initialState };
-
-  const topBlocks = workspace.getTopBlocks(true);
-
-  const flagBlocks = topBlocks.filter(b => b.type === 'sprite_when_flag_clicked');
-  const sources = flagBlocks.length > 0
-    ? flagBlocks.map(b => b.getNextBlock())
-    : topBlocks.filter(b => !isHatBlock(b));
-
-  for (const start of sources) {
-    state = yield* walkBlocks(start, state, ctx);
-    if (ctx.stop) break;
-  }
-
-  return state;
+  yield* walkBlocks(startBlock, state, ctx);
 }
 
-// Run stacks attached to hat blocks of a specific type, optionally filtered by a field value.
-// matchField=null skips the field check (e.g. for sprite_when_clicked).
-export function* executeHatBlocks(workspace, hatType, matchField, matchValue, initialState = DEFAULT_SPRITE_STATE, world = null) {
-  const ctx = { world, stop: false };
-  let state = { ...DEFAULT_SPRITE_STATE, ...initialState };
+// The set of scripts that should start running on "when flag clicked"
+// (one per "when flag clicked" hat, run concurrently) — or, if there are
+// none, every top-level stack that isn't under a hat block, each as its
+// own concurrent script.
+export function getFlagScripts(workspace) {
+  const topBlocks = workspace.getTopBlocks(true);
+  const flagBlocks = topBlocks.filter(b => b.type === 'sprite_when_flag_clicked');
+  if (flagBlocks.length > 0) {
+    return flagBlocks.map(b => b.getNextBlock()).filter(Boolean);
+  }
+  return topBlocks.filter(b => !isHatBlock(b));
+}
 
+// The set of scripts attached to hat blocks of `hatType`, optionally filtered
+// by a field value (matchValue, or hats whose field is 'any'). matchField=null
+// skips the field check (e.g. for sprite_when_clicked). One entry per matching
+// hat that has a body — each runs as its own concurrent script.
+export function getHatScripts(workspace, hatType, matchField, matchValue) {
+  const scripts = [];
   for (const hat of workspace.getTopBlocks(true)) {
     if (hat.type !== hatType) continue;
     if (matchField !== null) {
@@ -84,27 +90,16 @@ export function* executeHatBlocks(workspace, hatType, matchField, matchValue, in
       if (fv !== matchValue && fv !== 'any') continue;
     }
     const next = hat.getNextBlock();
-    if (next) state = yield* walkBlocks(next, state, ctx);
-    if (ctx.stop) break;
+    if (next) scripts.push(next);
   }
-
-  return state;
+  return scripts;
 }
 
-// True if the workspace has at least one top-level hat block of `hatType`
-// whose `matchField` field equals `matchValue` (or is 'any'). Used to avoid
-// starting a no-op animation — and clobbering an in-flight one — when a hat
-// event fires but no script is listening for it.
+// True if `getHatScripts` would return at least one script. Used to avoid
+// starting a no-op animation — and registering an unnecessary thread — when
+// a hat event fires but no script is listening for it.
 export function hasMatchingHat(workspace, hatType, matchField, matchValue) {
-  for (const hat of workspace.getTopBlocks(true)) {
-    if (hat.type !== hatType) continue;
-    if (matchField !== null) {
-      const fv = hat.getFieldValue(matchField);
-      if (fv !== matchValue && fv !== 'any') continue;
-    }
-    return true;
-  }
-  return false;
+  return getHatScripts(workspace, hatType, matchField, matchValue).length > 0;
 }
 
 function isHatBlock(block) {
@@ -115,15 +110,15 @@ function isHatBlock(block) {
 }
 
 function* walkBlocks(block, state, ctx) {
-  if (!block) return state;
-  state = yield* applyBlock(block, state, ctx);
-  if (ctx.stop) return state;
-  return yield* walkBlocks(block.getNextBlock(), state, ctx);
+  if (!block) return;
+  yield* applyBlock(block, state, ctx);
+  if (ctx.stop) return;
+  yield* walkBlocks(block.getNextBlock(), state, ctx);
 }
 
 // ── Block executor ────────────────────────────────────────────
+// `state` is the sprite's shared mutable state object — mutated in place.
 function* applyBlock(block, state, ctx) {
-  let s = { ...state };
   const world = ctx.world;
 
   switch (block.type) {
@@ -131,83 +126,84 @@ function* applyBlock(block, state, ctx) {
     // ── MOTION ───────────────────────────────────────────────
     case 'sprite_move_steps': {
       const steps = Number(block.getFieldValue('STEPS'));
-      const rad = (s.rotation * Math.PI) / 180;
-      s.x += steps * Math.cos(rad);
-      s.y -= steps * Math.sin(rad); // -y because +y is up (canvas y is flipped)
-      yield { state: { ...s } };
+      const rad = (state.rotation * Math.PI) / 180;
+      state.x += steps * Math.cos(rad);
+      state.y -= steps * Math.sin(rad); // -y because +y is up (canvas y is flipped)
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_turn_right': {
-      s.rotation = (s.rotation + Number(block.getFieldValue('DEGREES'))) % 360;
-      yield { state: { ...s } };
+      state.rotation = (state.rotation + Number(block.getFieldValue('DEGREES'))) % 360;
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_turn_left': {
-      s.rotation = ((s.rotation - Number(block.getFieldValue('DEGREES'))) + 360) % 360;
-      yield { state: { ...s } };
+      state.rotation = ((state.rotation - Number(block.getFieldValue('DEGREES'))) + 360) % 360;
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_go_to_xy': {
-      s.x = Number(block.getFieldValue('X'));
-      s.y = Number(block.getFieldValue('Y'));
-      yield { state: { ...s } };
+      state.x = Number(block.getFieldValue('X'));
+      state.y = Number(block.getFieldValue('Y'));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_glide_secs_to_xy': {
       const secs = Math.max(0, Number(block.getFieldValue('SECS')));
       const tx = Number(block.getFieldValue('X'));
       const ty = Number(block.getFieldValue('Y'));
+      const fromX = state.x;
+      const fromY = state.y;
       const steps = 10;
       const stepMs = (secs * 1000) / steps;
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
-        yield {
-          state: { ...s, x: s.x + (tx - s.x) * t, y: s.y + (ty - s.y) * t },
-          delay: stepMs,
-        };
+        state.x = fromX + (tx - fromX) * t;
+        state.y = fromY + (ty - fromY) * t;
+        yield { state: { ...state }, delay: stepMs };
       }
-      s.x = tx;
-      s.y = ty;
+      state.x = tx;
+      state.y = ty;
       break;
     }
     case 'sprite_point_in_direction': {
-      s.rotation = Number(block.getFieldValue('DIRECTION'));
-      yield { state: { ...s } };
+      state.rotation = Number(block.getFieldValue('DIRECTION'));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_change_x_by': {
-      s.x += Number(block.getFieldValue('DX'));
-      yield { state: { ...s } };
+      state.x += Number(block.getFieldValue('DX'));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_change_y_by': {
-      s.y += Number(block.getFieldValue('DY'));
-      yield { state: { ...s } };
+      state.y += Number(block.getFieldValue('DY'));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_set_x': {
-      s.x = Number(block.getFieldValue('X'));
-      yield { state: { ...s } };
+      state.x = Number(block.getFieldValue('X'));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_set_y': {
-      s.y = Number(block.getFieldValue('Y'));
-      yield { state: { ...s } };
+      state.y = Number(block.getFieldValue('Y'));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_if_on_edge_bounce': {
-      const hw = (s.width * s.size) / 200;
-      const hh = (s.height * s.size) / 200;
-      if      (s.x - hw < -STAGE_HALF_W) { s.x = -STAGE_HALF_W + hw; s.rotation = (180 - s.rotation + 360) % 360; }
-      else if (s.x + hw >  STAGE_HALF_W) { s.x =  STAGE_HALF_W - hw; s.rotation = (180 - s.rotation + 360) % 360; }
-      if      (s.y - hh < -STAGE_HALF_H) { s.y = -STAGE_HALF_H + hh; s.rotation = (360 - s.rotation) % 360; }
-      else if (s.y + hh >  STAGE_HALF_H) { s.y =  STAGE_HALF_H - hh; s.rotation = (360 - s.rotation) % 360; }
-      yield { state: { ...s } };
+      const hw = (state.width * state.size) / 200;
+      const hh = (state.height * state.size) / 200;
+      if      (state.x - hw < -STAGE_HALF_W) { state.x = -STAGE_HALF_W + hw; state.rotation = (180 - state.rotation + 360) % 360; }
+      else if (state.x + hw >  STAGE_HALF_W) { state.x =  STAGE_HALF_W - hw; state.rotation = (180 - state.rotation + 360) % 360; }
+      if      (state.y - hh < -STAGE_HALF_H) { state.y = -STAGE_HALF_H + hh; state.rotation = (360 - state.rotation) % 360; }
+      else if (state.y + hh >  STAGE_HALF_H) { state.y =  STAGE_HALF_H - hh; state.rotation = (360 - state.rotation) % 360; }
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_set_rotation_style': {
-      s.rotationStyle = block.getFieldValue('STYLE');
-      yield { state: { ...s } };
+      state.rotationStyle = block.getFieldValue('STYLE');
+      yield { state: { ...state } };
       break;
     }
 
@@ -215,92 +211,94 @@ function* applyBlock(block, state, ctx) {
     case 'sprite_say_for_secs': {
       const text = block.getFieldValue('TEXT') ?? '';
       const ms = Math.max(0, Number(block.getFieldValue('SECS'))) * 1000;
-      yield { state: { ...s, bubble: { text, type: 'say' } }, delay: ms };
-      s.bubble = null;
-      yield { state: { ...s } };
+      state.bubble = { text, type: 'say' };
+      yield { state: { ...state }, delay: ms };
+      state.bubble = null;
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_say': {
-      s.bubble = { text: block.getFieldValue('TEXT') ?? '', type: 'say' };
-      yield { state: { ...s } };
+      state.bubble = { text: block.getFieldValue('TEXT') ?? '', type: 'say' };
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_think_for_secs': {
       const text = block.getFieldValue('TEXT') ?? '';
       const ms = Math.max(0, Number(block.getFieldValue('SECS'))) * 1000;
-      yield { state: { ...s, bubble: { text, type: 'think' } }, delay: ms };
-      s.bubble = null;
-      yield { state: { ...s } };
+      state.bubble = { text, type: 'think' };
+      yield { state: { ...state }, delay: ms };
+      state.bubble = null;
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_think': {
-      s.bubble = { text: block.getFieldValue('TEXT') ?? '', type: 'think' };
-      yield { state: { ...s } };
+      state.bubble = { text: block.getFieldValue('TEXT') ?? '', type: 'think' };
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_change_size_by': {
-      s.size = Math.max(0, s.size + Number(block.getFieldValue('DELTA')));
-      yield { state: { ...s } };
+      state.size = Math.max(0, state.size + Number(block.getFieldValue('DELTA')));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_set_size_to': {
-      s.size = Math.max(0, Number(block.getFieldValue('SIZE')));
-      yield { state: { ...s } };
+      state.size = Math.max(0, Number(block.getFieldValue('SIZE')));
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_show': {
-      s.visible = true;
-      yield { state: { ...s } };
+      state.visible = true;
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_hide': {
-      s.visible = false;
-      yield { state: { ...s } };
+      state.visible = false;
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_go_to_layer': {
       const front = block.getFieldValue('LAYER') === 'front';
-      s.layer = front ? ++layerCounter : -(++layerCounter);
-      yield { state: { ...s } };
+      state.layer = front ? ++layerCounter : -(++layerCounter);
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_next_costume': {
-      const list = s.costumes && s.costumes.length ? s.costumes : [{ name: 'costume1', url: s.costume }];
-      s.costumeIndex = ((s.costumeIndex ?? 0) + 1) % list.length;
-      s.costume = list[s.costumeIndex].url;
-      yield { state: { ...s } };
+      const list = state.costumes && state.costumes.length ? state.costumes : [{ name: 'costume1', url: state.costume }];
+      state.costumeIndex = ((state.costumeIndex ?? 0) + 1) % list.length;
+      state.costume = list[state.costumeIndex].url;
+      yield { state: { ...state } };
       break;
     }
     case 'sprite_switch_costume': {
       const name = block.getFieldValue('COSTUME');
-      const list = s.costumes || [];
+      const list = state.costumes || [];
       const idx = list.findIndex(c => c.name === name);
       if (idx >= 0) {
-        s.costumeIndex = idx;
-        s.costume = list[idx].url;
+        state.costumeIndex = idx;
+        state.costume = list[idx].url;
       }
-      yield { state: { ...s } };
+      yield { state: { ...state } };
       break;
     }
 
     // ── VARIABLES ────────────────────────────────────────────
     case 'variables_set': {
       const varId = block.getFieldValue('VAR');
-      const val = evaluateValue(block.getInputTargetBlock('VALUE'), s, world);
-      s.variables = { ...(s.variables || {}), [varId]: val };
-      yield { state: { ...s }, delay: 0 }; // instant frame captures updated variable
+      const val = evaluateValue(block.getInputTargetBlock('VALUE'), state, world);
+      state.variables = { ...(state.variables || {}), [varId]: val };
+      yield { state: { ...state }, delay: 0 }; // instant frame captures updated variable
       break;
     }
     case 'math_change': {
       const varId = block.getFieldValue('VAR');
-      const delta = evaluateValue(block.getInputTargetBlock('DELTA'), s, world);
-      const prev = Number((s.variables || {})[varId] ?? 0);
-      s.variables = { ...(s.variables || {}), [varId]: prev + delta };
-      yield { state: { ...s }, delay: 0 };
+      const delta = evaluateValue(block.getInputTargetBlock('DELTA'), state, world);
+      const prev = Number((state.variables || {})[varId] ?? 0);
+      state.variables = { ...(state.variables || {}), [varId]: prev + delta };
+      yield { state: { ...state }, delay: 0 };
       break;
     }
 
-    // ── EVENTS hat blocks — skip, handled by executeSprite ───
+    // ── EVENTS hat blocks — skip, handled by getFlagScripts/getHatScripts ──
     case 'sprite_when_flag_clicked':
     case 'sprite_when_key_pressed':
     case 'sprite_when_clicked':
@@ -308,34 +306,34 @@ function* applyBlock(block, state, ctx) {
       break;
     case 'sprite_broadcast': {
       const message = block.getFieldValue('MESSAGE') ?? '';
-      yield { state: { ...s }, broadcast: message };
+      yield { state: { ...state }, broadcast: message };
       break;
     }
     case 'sprite_broadcast_and_wait': {
       const message = block.getFieldValue('MESSAGE') ?? '';
-      yield { state: { ...s }, broadcast: message, delay: BROADCAST_WAIT_MS };
+      yield { state: { ...state }, broadcast: message, delay: BROADCAST_WAIT_MS };
       break;
     }
 
     // ── SENSING ──────────────────────────────────────────────
     case 'sprite_reset_timer': {
       if (world?.timer) world.timer.start = Date.now();
-      yield { state: { ...s } };
+      yield { state: { ...state } };
       break;
     }
 
     // ── CONTROL ──────────────────────────────────────────────
     case 'sprite_wait': {
       const ms = Math.max(0, Number(block.getFieldValue('SECS'))) * 1000;
-      yield { state: { ...s }, delay: ms };
+      yield { state: { ...state }, delay: ms };
       break;
     }
     case 'sprite_repeat': {
       const times = Math.max(1, Number(block.getFieldValue('TIMES')));
       const inner = block.getInputTargetBlock('DO');
       for (let i = 0; i < times; i++) {
-        s = yield* walkBlocks(inner, s, ctx);
-        if (ctx.stop) return s;
+        yield* walkBlocks(inner, state, ctx);
+        if (ctx.stop) return;
       }
       break;
     }
@@ -343,50 +341,48 @@ function* applyBlock(block, state, ctx) {
       const inner = block.getInputTargetBlock('DO');
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        s = yield* walkBlocks(inner, s, ctx);
-        if (ctx.stop) return s;
+        yield* walkBlocks(inner, state, ctx);
+        if (ctx.stop) return;
         // Guarantee at least one yield per iteration (even for an empty body)
         // so live state (Sensing) is re-checked and Stop can interrupt.
-        yield { state: { ...s }, delay: 0 };
+        yield { state: { ...state }, delay: 0 };
       }
     }
     case 'sprite_if': {
-      if (evaluateValue(block.getInputTargetBlock('CONDITION'), s, world)) {
-        s = yield* walkBlocks(block.getInputTargetBlock('DO'), s, ctx);
+      if (evaluateValue(block.getInputTargetBlock('CONDITION'), state, world)) {
+        yield* walkBlocks(block.getInputTargetBlock('DO'), state, ctx);
       }
       break;
     }
     case 'sprite_if_else': {
-      if (evaluateValue(block.getInputTargetBlock('CONDITION'), s, world)) {
-        s = yield* walkBlocks(block.getInputTargetBlock('DO'), s, ctx);
+      if (evaluateValue(block.getInputTargetBlock('CONDITION'), state, world)) {
+        yield* walkBlocks(block.getInputTargetBlock('DO'), state, ctx);
       } else {
-        s = yield* walkBlocks(block.getInputTargetBlock('ELSE'), s, ctx);
+        yield* walkBlocks(block.getInputTargetBlock('ELSE'), state, ctx);
       }
       break;
     }
     case 'sprite_wait_until': {
-      while (!evaluateValue(block.getInputTargetBlock('CONDITION'), s, world)) {
-        yield { state: { ...s }, delay: 50 };
+      while (!evaluateValue(block.getInputTargetBlock('CONDITION'), state, world)) {
+        yield { state: { ...state }, delay: 50 };
       }
       break;
     }
     case 'sprite_repeat_until': {
       const inner = block.getInputTargetBlock('DO');
-      while (!evaluateValue(block.getInputTargetBlock('CONDITION'), s, world)) {
-        s = yield* walkBlocks(inner, s, ctx);
-        if (ctx.stop) return s;
-        yield { state: { ...s }, delay: 0 };
+      while (!evaluateValue(block.getInputTargetBlock('CONDITION'), state, world)) {
+        yield* walkBlocks(inner, state, ctx);
+        if (ctx.stop) return;
+        yield { state: { ...state }, delay: 0 };
       }
       break;
     }
     case 'sprite_stop': {
       ctx.stop = true;
-      yield { state: { ...s }, stop: true };
+      yield { state: { ...state }, stop: true };
       break;
     }
   }
-
-  return s;
 }
 
 // ── Value evaluator (reporter blocks → JS value) ──────────────

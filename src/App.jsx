@@ -20,10 +20,15 @@ const STEP_DELAY = 300;
 const CANVAS_W = 480;
 const CANVAS_H = 300;
 
-function createSprite(name, overrides = {}) {
+// `libraryName` records which SPRITE_LIBRARY entry this sprite's costumes
+// came from (default 'Roundy', matching DEFAULT_SPRITE_STATE) — saved projects
+// store this instead of raw costume URLs, which are re-resolved from
+// SPRITE_LIBRARY on load (Vite asset URLs are hashed per-build).
+function createSprite(name, overrides = {}, libraryName = 'Roundy') {
   return {
     id: crypto.randomUUID(),
     name,
+    libraryName,
     state: { ...DEFAULT_SPRITE_STATE, ...overrides },
   };
 }
@@ -406,6 +411,8 @@ function App() {
   const robotWorkspaceRef = useRef(null);
   const spriteWorkspaces     = useRef(new Map()); // spriteId -> WorkspaceSvg
   const spriteWorkspaceDivs  = useRef(new Map()); // spriteId -> HTMLDivElement
+  const pendingWorkspaceXmlRef = useRef(new Map()); // spriteId -> XML string to load once its workspace is injected
+  const fileInputRef = useRef(null); // hidden <input type="file"> for Load Project
   const animTimersRef = useRef(new Map());        // spriteId -> Set<timeoutId> (one entry per running script "thread")
   const spriteStateRefs = useRef(new Map());      // spriteId -> shared mutable state object for the current run session
   const spritesRef = useRef([]);                  // always holds latest sprites without closure issues
@@ -638,6 +645,13 @@ function App() {
         zoom: { controls: true, wheel: true, startScale: 1.0 },
       });
       spriteWorkspaces.current.set(sprite.id, workspace);
+
+      const pendingXml = pendingWorkspaceXmlRef.current.get(sprite.id);
+      if (pendingXml) {
+        pendingWorkspaceXmlRef.current.delete(sprite.id);
+        const dom = Blockly.utils.xml.textToDom(pendingXml);
+        Blockly.Xml.domToWorkspace(dom, workspace);
+      }
     }
 
     const currentIds = new Set(sprites.filter(s => !s.isClone).map(s => s.id));
@@ -781,7 +795,7 @@ function App() {
   // item is an entry from SPRITE_LIBRARY.
   function handleChooseLibrarySprite(item) {
     const overrides = { costume: item.costume, costumes: item.costumes, costumeIndex: 0, color: item.color };
-    const newSprite = createSprite(item.name, overrides);
+    const newSprite = createSprite(item.name, overrides, item.name);
     setSprites(prev => [...prev, newSprite]);
     setSelectedSpriteId(newSprite.id);
     setShowLibrary(false);
@@ -828,6 +842,93 @@ function App() {
     }
   }
 
+  // Saves the robot workspace, every sprite's workspace + state, and the
+  // current sprite selection to a single .mebot project file (JSON content).
+  // Costumes aren't stored directly — Vite asset URLs are hashed per build,
+  // so each sprite's `libraryName` is saved instead and costumes are
+  // re-resolved from SPRITE_LIBRARY on load.
+  function handleSaveProject() {
+    const originals = sprites.filter(s => !s.isClone);
+    const spriteData = originals.map(sprite => {
+      const ws = spriteWorkspaces.current.get(sprite.id);
+      const workspaceXml = ws ? Blockly.Xml.domToText(Blockly.Xml.workspaceToDom(ws)) : '';
+      const { costume, costumes, bubble, ...state } = sprite.state;
+      return { name: sprite.name, libraryName: sprite.libraryName, workspaceXml, state };
+    });
+
+    const robotXml = robotWorkspaceRef.current
+      ? Blockly.Xml.domToText(Blockly.Xml.workspaceToDom(robotWorkspaceRef.current))
+      : '';
+
+    const project = {
+      version: 1,
+      robot: { workspaceXml: robotXml },
+      sprites: spriteData,
+      selectedIndex: Math.max(0, originals.findIndex(s => s.id === selectedSpriteId)),
+    };
+
+    const blob = new Blob([JSON.stringify(project)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'project.mebot';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Loads a .mebot project file: rebuilds sprites with fresh ids (so the
+  // workspace-injection effect always treats them as new), stashes each
+  // sprite's saved Blockly XML in pendingWorkspaceXmlRef to be applied once
+  // its workspace is injected, and restores the robot workspace directly.
+  function handleLoadProject(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let project;
+      try {
+        project = JSON.parse(reader.result);
+      } catch (err) {
+        console.error('[Sharky] failed to parse .mebot file:', err);
+        return;
+      }
+      if (!project.sprites || project.sprites.length === 0) return;
+
+      stopAll();
+
+      const newSprites = project.sprites.map(saved => {
+        const libEntry = SPRITE_LIBRARY.find(l => l.name === saved.libraryName) ?? SPRITE_LIBRARY[0];
+        const costumes = libEntry.costumes;
+        const costumeIndex = (saved.state?.costumeIndex ?? 0) % costumes.length;
+        const id = crypto.randomUUID();
+        if (saved.workspaceXml) pendingWorkspaceXmlRef.current.set(id, saved.workspaceXml);
+        return {
+          id,
+          name: saved.name,
+          libraryName: libEntry.name,
+          state: {
+            ...DEFAULT_SPRITE_STATE,
+            ...saved.state,
+            costumes,
+            costume: costumes[costumeIndex].url,
+          },
+        };
+      });
+
+      setSprites(newSprites);
+      spritesRef.current = newSprites;
+      const idx = Math.min(Math.max(0, project.selectedIndex ?? 0), newSprites.length - 1);
+      setSelectedSpriteId(newSprites[idx].id);
+
+      if (robotWorkspaceRef.current) {
+        robotWorkspaceRef.current.clear();
+        if (project.robot?.workspaceXml) {
+          const dom = Blockly.utils.xml.textToDom(project.robot.workspaceXml);
+          Blockly.Xml.domToWorkspace(dom, robotWorkspaceRef.current);
+        }
+      }
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#111' }}>
 
@@ -838,11 +939,35 @@ function App() {
       {/* ── Top bar ─────────────────────────────────────────── */}
       <div style={{
         height: 48, background: '#111', display: 'flex', alignItems: 'center',
-        padding: '0 16px', borderBottom: '1px solid #2e2e2e', flexShrink: 0,
+        justifyContent: 'space-between', padding: '0 16px',
+        borderBottom: '1px solid #2e2e2e', flexShrink: 0,
       }}>
         <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, fontFamily: 'system-ui, sans-serif' }}>
           Sharky Studio
         </span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".mebot"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleLoadProject(file);
+              e.target.value = '';
+            }}
+          />
+          <button onClick={() => fileInputRef.current?.click()} style={{
+            background: '#2a2a2a', color: '#ccc', border: '1px solid #444',
+            borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
+            fontSize: 12, fontFamily: 'system-ui, sans-serif',
+          }}>Load Project</button>
+          <button onClick={handleSaveProject} style={{
+            background: '#2a2a2a', color: '#ccc', border: '1px solid #444',
+            borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
+            fontSize: 12, fontFamily: 'system-ui, sans-serif',
+          }}>Save Project</button>
+        </div>
       </div>
 
       {/* ── Content ─────────────────────────────────────────── */}

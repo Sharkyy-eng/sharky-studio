@@ -1,0 +1,151 @@
+<xml xmlns="https://developers.google.com/blockly/xml">
+
+  <category name="Motion" colour="#4C97FF">
+    <block type="sprite_move_steps"><field name="STEPS">10</field></block>
+    <block type="sprite_turn_right"><field name="DEGREES">15</field></block>
+    <block type="sprite_turn_left"><field name="DEGREES">15</field></block>
+    <sep gap="8"/>
+    <block type="sprite_go_to_xy">
+      <field name="X">0</field><field name="Y">0</field>
+    </block>
+    <block type="sprite_glide_secs_to_xy">
+      <field name="SECS">1</field><field name="X">0</field><field name="Y">0</field>
+    </block>
+    <sep gap="8"/>
+    <block type="sprite_point_in_direction"><field name="DIRECTION">0</field></block>
+    <sep gap="8"/>
+    <block type="sprite_change_x_by"><field name="DX">10</field></block>
+    <block type="sprite_set_x"><field name="X">0</field></block>
+    <block type="sprite_change_y_by"><field name="DY">10</field></block>
+    <block type="sprite_set_y"><field name="Y">0</field></block>
+    <sep gap="8"/>
+    <block type="sprite_if_on_edge_bounce"/>
+    <block type="sprite_set_rotation_style"/>
+    <sep gap="8"/>
+    <block type="sprite_x_position"/>
+    <block type="sprite_y_position"/>
+    <block type="sprite_direction"/>
+  </category>
+
+  <category name="Looks" colour="#9966FF">
+    <block type="sprite_say_for_secs">
+      <field name="TEXT">Hello!</field><field name="SECS">2</field>
+    </block>
+    <block type="sprite_say"><field name="TEXT">Hello!</field></block>
+    <block type="sprite_think_for_secs">
+      <field name="TEXT">Hmm...</field><field name="SECS">2</field>
+    </block>
+    <block type="sprite_think"><field name="TEXT">Hmm...</field></block>
+    <sep gap="8"/>
+    <block type="sprite_change_size_by"><field name="DELTA">10</field></block>
+    <block type="sprite_set_size_to"><field name="SIZE">100</field></block>
+    <sep gap="8"/>
+    <block type="sprite_next_costume"/>
+    <block type="sprite_switch_costume"/>
+    <block type="sprite_show"/>
+    <block type="sprite_hide"/>
+    <block type="sprite_go_to_layer"/>
+    <sep gap="8"/>
+    <block type="sprite_size_reporter"/>
+  </category>
+
+  <category name="Events" colour="#FFD500">
+    <block type="sprite_when_flag_clicked"/>
+    <block type="sprite_when_key_pressed"/>
+    <block type="sprite_when_clicked"/>
+  </category>
+
+  <category name="Control" colour="#FFAB19">
+    <block type="sprite_wait"><field name="SECS">1</field></block>
+    <block type="sprite_repeat"><field name="TIMES">10</field></block>
+    <block type="sprite_forever"/>
+    <sep gap="8"/>
+    <block type="sprite_if">
+      <value name="CONDITION">
+        <shadow type="sprite_gt">
+          <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+          <value name="B"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+        </shadow>
+      </value>
+    </block>
+    <block type="sprite_if_else">
+      <value name="CONDITION">
+        <shadow type="sprite_gt">
+          <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+          <value name="B"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+        </shadow>
+      </value>
+    </block>
+    <sep gap="8"/>
+    <block type="sprite_wait_until"/>
+    <block type="sprite_repeat_until"/>
+    <sep gap="8"/>
+    <block type="sprite_stop"/>
+  </category>
+
+  <category name="Operators" colour="#59C059">
+    <block type="sprite_add">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+    </block>
+    <block type="sprite_subtract">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+    </block>
+    <block type="sprite_multiply">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">1</field></shadow></value>
+    </block>
+    <block type="sprite_divide">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">1</field></shadow></value>
+    </block>
+    <block type="sprite_random"><field name="FROM">1</field><field name="TO">10</field></block>
+    <sep gap="8"/>
+    <block type="sprite_gt">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">50</field></shadow></value>
+    </block>
+    <block type="sprite_lt">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">50</field></shadow></value>
+    </block>
+    <block type="sprite_eq">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+    </block>
+    <sep gap="8"/>
+    <block type="sprite_and"/>
+    <block type="sprite_or"/>
+    <block type="sprite_not"/>
+    <sep gap="8"/>
+    <block type="sprite_join">
+      <value name="A"><shadow type="sprite_text"><field name="TEXT">hello </field></shadow></value>
+      <value name="B"><shadow type="sprite_text"><field name="TEXT">world</field></shadow></value>
+    </block>
+    <block type="sprite_letter_of">
+      <value name="TEXT"><shadow type="sprite_text"><field name="TEXT">world</field></shadow></value>
+    </block>
+    <block type="sprite_length_of">
+      <value name="TEXT"><shadow type="sprite_text"><field name="TEXT">world</field></shadow></value>
+    </block>
+    <block type="sprite_contains">
+      <value name="A"><shadow type="sprite_text"><field name="TEXT">apple</field></shadow></value>
+      <value name="B"><shadow type="sprite_text"><field name="TEXT">a</field></shadow></value>
+    </block>
+    <sep gap="8"/>
+    <block type="sprite_mod">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+      <value name="B"><shadow type="sprite_number"><field name="NUM">10</field></shadow></value>
+    </block>
+    <block type="sprite_round">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">0</field></shadow></value>
+    </block>
+    <block type="sprite_math_op">
+      <value name="A"><shadow type="sprite_number"><field name="NUM">9</field></shadow></value>
+    </block>
+  </category>
+
+  <category name="Variables" custom="VARIABLE" colour="#FF6680"/>
+
+</xml>

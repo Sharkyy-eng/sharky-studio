@@ -1,7 +1,65 @@
 <xml id="toolbox" style="display: none">
+
+  <!-- ── Robot blocks ──────────────────────────────────────── -->
+
   <category name="Movement" colour="230">
     <block type="move_forward"></block>
+    <block type="move_backward"></block>
     <block type="turn_left"></block>
     <block type="turn_right"></block>
+    <block type="stop_motors"></block>
   </category>
+
+  <category name="Sensors" colour="20">
+    <!-- These are oval-shaped value blocks — plug them into other blocks -->
+    <block type="get_distance"></block>
+    <block type="is_obstacle_close"></block>
+  </category>
+
+  <category name="Actuators" colour="160">
+    <block type="set_servo"></block>
+    <block type="wait_ms"></block>
+  </category>
+
+  <!-- ── Scratch-style logic / flow blocks ─────────────────── -->
+
+  <!-- controls_if and controls_whileUntil are Blockly built-ins.
+       The <mutation> tag pre-configures a block variant:
+         else="1"   → starts with an else clause attached
+       Without mutation, controls_if starts as plain "if". -->
+  <category name="Control" colour="65">
+    <block type="controls_if"></block>
+    <block type="controls_if">
+      <mutation else="1"></mutation>
+    </block>
+    <block type="controls_repeat_ext">
+      <value name="TIMES">
+        <block type="math_number"><field name="NUM">10</field></block>
+      </value>
+    </block>
+    <block type="controls_whileUntil"></block>
+    <block type="repeat_forever"></block>
+  </category>
+
+  <!-- Operators: math and comparison ovals (value blocks).
+       These are Blockly built-ins — no custom JS needed. -->
+  <category name="Operators" colour="230">
+    <block type="math_arithmetic"></block>
+    <block type="math_number"></block>
+    <block type="math_random_int">
+      <value name="FROM"><block type="math_number"><field name="NUM">1</field></block></value>
+      <value name="TO">  <block type="math_number"><field name="NUM">10</field></block></value>
+    </block>
+    <block type="logic_compare"></block>
+    <block type="logic_operation"></block>
+    <block type="logic_negate"></block>
+    <block type="logic_boolean"></block>
+  </category>
+
+  <!-- Variables: custom="VARIABLE" is a special Blockly keyword.
+       It automatically shows a "Create variable..." button and
+       generates set/get/change blocks for every variable the user creates.
+       No extra XML needed — Blockly handles it all. -->
+  <category name="Variables" colour="330" custom="VARIABLE"></category>
+
 </xml>

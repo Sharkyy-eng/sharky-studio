@@ -57,6 +57,30 @@ Blockly.defineBlocksWithJsonArray([
     "nextStatement": null,
     "colour": 230,
     "tooltip": "Rotate the robot right"
+  },
+
+  // Block 4: Move backward
+  {
+    "type": "move_backward",
+    "message0": "move backward %1 cm",
+    "args0": [
+      { "type": "field_number", "name": "DIST", "value": 10, "min": 0 }
+    ],
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": 230,
+    "tooltip": "Drive the robot backward"
+  },
+
+  // Block 5: Stop motors
+  // colour: 0 = red — visually stands out as an emergency/stop action
+  {
+    "type": "stop_motors",
+    "message0": "stop motors",
+    "previousStatement": null,
+    "nextStatement": null,
+    "colour": 0,
+    "tooltip": "Stop both drive motors immediately"
   }
 
 ]);

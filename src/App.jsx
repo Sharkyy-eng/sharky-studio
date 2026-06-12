@@ -14,6 +14,7 @@ import { runScript, getFlagScripts, getHatScripts, DEFAULT_SPRITE_STATE } from '
 import robotToolboxXml  from './blockly/toolboxes/robot.xml?raw';
 import spriteToolboxXml from './blockly/toolboxes/sprite.xml?raw';
 import { SPRITE_LIBRARY } from './sprites/library.js';
+import mebotLogoUrl from './assets/mebot-logo.png';
 
 const STEP_DELAY = 300;
 
@@ -451,6 +452,36 @@ function FileMenuItem({ label, onClick }) {
   );
 }
 
+// ─── Sprite stage controls (Scratch-style green flag / stop) ──
+function GreenFlagButton({ onClick }) {
+  return (
+    <button onClick={onClick} title="Run (green flag)" style={{
+      width: 26, height: 26, padding: 0, display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      background: '#2a2a2a', border: '1px solid #3a3a3a', borderRadius: 4, cursor: 'pointer',
+    }}>
+      <svg width="16" height="16" viewBox="0 0 20 20">
+        <rect x="3" y="1" width="2" height="18" fill="#888" />
+        <path d="M5 2 L18 5.5 L5 9 Z" fill="#4CAF50" />
+      </svg>
+    </button>
+  );
+}
+
+function StopButton({ onClick }) {
+  return (
+    <button onClick={onClick} title="Stop everything" style={{
+      width: 26, height: 26, padding: 0, display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      background: '#922', border: '1px solid #b33', borderRadius: '50%', cursor: 'pointer',
+    }}>
+      <svg width="12" height="12" viewBox="0 0 12 12">
+        <rect x="0" y="0" width="12" height="12" rx="1.5" fill="#fff" />
+      </svg>
+    </button>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────
 function App() {
   const robotDiv = useRef(null);
@@ -741,8 +772,11 @@ function App() {
     return () => { clearInterval(frameTimer); clearTimeout(hideTimer); };
   }, [showSavedPopup]);
 
-  function handleRun() {
-    if (isRunning) { stopAll(); return; }
+  // Green flag — (re)starts every sprite's "when flag clicked" scripts.
+  // If scripts are already running, stop them first (Scratch behavior:
+  // clicking the green flag while running restarts everything fresh).
+  function handleGreenFlag() {
+    if (isRunning) stopAll();
 
     // Green flag deletes all clones from the previous run (Scratch behavior).
     const originals = sprites.filter(s => !s.isClone);
@@ -1031,16 +1065,7 @@ function App() {
         borderBottom: '1px solid #2e2e2e', flexShrink: 0,
       }}>
         {/* Branding */}
-        <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{
-            color: '#ff8c00', fontWeight: 800, fontSize: 16,
-            letterSpacing: '0.04em', fontFamily: 'system-ui, sans-serif',
-          }}>MEBOT</span>
-          <span style={{ color: '#444', fontSize: 14 }}>|</span>
-          <span style={{ color: '#999', fontWeight: 500, fontSize: 14, fontFamily: 'system-ui, sans-serif' }}>
-            mebotStudio
-          </span>
-        </span>
+        <img src={mebotLogoUrl} alt="mebot" style={{ height: 26, objectFit: 'contain' }} />
 
         {/* File menu */}
         <div style={{ position: 'relative' }}>
@@ -1128,14 +1153,8 @@ function App() {
                     fontSize: 11, color: '#666', fontFamily: 'system-ui, sans-serif',
                     textTransform: 'uppercase', letterSpacing: '0.08em',
                   }}>Stage</span>
-                  <button onClick={handleRun} style={{
-                    background: isRunning ? '#922' : '#1a7a3a',
-                    color: '#fff', border: 'none', borderRadius: 4,
-                    padding: '3px 12px', cursor: 'pointer',
-                    fontSize: 11, fontFamily: 'system-ui, sans-serif', fontWeight: 600,
-                  }}>
-                    {isRunning ? '■ Stop' : '▶ Run'}
-                  </button>
+                  <GreenFlagButton onClick={handleGreenFlag} />
+                  <StopButton onClick={stopAll} />
                 </div>
                 <button onClick={() => setIsFullscreen(false)} style={{
                   background: '#2a2a2a', color: '#ccc', border: '1px solid #444',
@@ -1177,14 +1196,8 @@ function App() {
                   borderRadius: 4, padding: '2px 7px', cursor: 'pointer',
                   fontSize: 13, lineHeight: 1, fontFamily: 'system-ui, sans-serif',
                 }}>⛶</button>
-                <button onClick={handleRun} style={{
-                  background: isRunning ? '#922' : '#1a7a3a',
-                  color: '#fff', border: 'none', borderRadius: 4,
-                  padding: '3px 12px', cursor: 'pointer',
-                  fontSize: 11, fontFamily: 'system-ui, sans-serif', fontWeight: 600,
-                }}>
-                  {isRunning ? '■ Stop' : '▶ Run'}
-                </button>
+                <GreenFlagButton onClick={handleGreenFlag} />
+                <StopButton onClick={stopAll} />
               </div>
             </div>
             <div style={{ border: '1px solid #2e2e2e', borderRadius: 4, overflow: 'hidden' }}>

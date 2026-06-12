@@ -1068,7 +1068,7 @@ function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src={mebotLogoUrl} alt="mebot" style={{ height: 26, objectFit: 'contain' }} />
           <span style={{ color: '#555', fontSize: 16 }}>|</span>
-          <span style={{ color: '#ccc', fontWeight: 600, fontSize: 14 }}>mebotStudio</span>
+          <span style={{ color: '#ccc', fontWeight: 600, fontSize: 14, fontFamily: '"Century Gothic", sans-serif' }}>mebotStudio</span>
         </div>
 
         {/* File menu */}
